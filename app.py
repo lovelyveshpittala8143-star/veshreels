@@ -25,7 +25,7 @@ if "code" in st.query_params:
         pass
     st.query_params.clear()
 
-# Check user session safely - THIS IS THE FIX
+# Check user session safely
 if "user" not in st.session_state:
     try:
         session = supabase.auth.get_session()
@@ -37,12 +37,12 @@ if st.session_state.user is None:
     st.title("VeshReels 🎬")
     st.subheader("Create & Share Videos - 100% Free")
 
-    # Google Login Button
+    # Google Login Button - YOUR URL IS HARDCODED HERE
     if st.button("🔐 Continue with Google", type="primary", use_container_width=True):
         supabase.auth.sign_in_with_oauth({
             "provider": "google",
             "options": {
-                "redirect_to": st.secrets["STREAMLIT_URL"]
+                "redirect_to": "https://veshreels-oscqcpah5siaby32fsmhqk.streamlit.app/"
             }
         })
         st.rerun()
