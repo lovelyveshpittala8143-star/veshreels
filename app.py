@@ -2,10 +2,8 @@ import streamlit as st
 from supabase import create_client
 from groq import Groq
 
-# --- Page Config ---
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
-# --- Supabase Client ---
 @st.cache_resource
 def init_supabase():
     url = st.secrets["SUPABASE_URL"]
@@ -14,12 +12,10 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- Handle Google OAuth Callback - FIXED FOR NEW STREAMLIT ---
+# --- Handle Google OAuth Callback ---
 if "code" in st.query_params:
     try:
-        # Exchange the code for a session
         supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
-        # Clear the URL params so it doesn't run again
         st.query_params.clear()
         st.rerun()
     except Exception as e:
@@ -54,12 +50,15 @@ if session:
             st.warning("Please enter an idea first.")
 
 else:
-    # --- LOGGED OUT VIEW ---
+    # --- LOGGED OUT VIEW - FIXED BUTTON ---
     st.title("🎬 VeshReels AI")
     st.write("Login to generate AI reel scripts")
 
-    if st.button("Login with Google"):
-        supabase.auth.sign_in_with_oauth({
-            "provider": "google",
-            "options": {"redirect_to": st.secrets.get("REDIRECT_URL", "")}
-        })
+    # This generates the Google login URL
+    res = supabase.auth.sign_in_with_oauth({
+        "provider": "google",
+        "options": {"redirect_to": st.secrets.get("REDIRECT_URL", "")}
+    })
+
+    # This button actually takes you to Google
+    st.link_button("Login with Google", res.url, type="primary", use_container_width=True)
