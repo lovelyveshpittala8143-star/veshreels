@@ -4,6 +4,9 @@ import uuid
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
+# HARDCODE IT HERE - no more secrets line break issues
+REDIRECT_URL = "https://veshreels-mayj2zwnuucbmcgarvtbgz.streamlit.app"
+
 st.markdown("""
     <style>
 .block-container {
@@ -21,12 +24,10 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# --- CRITICAL: Handle Google OAuth redirect ---
+# Handle Google OAuth redirect
 if "code" in st.query_params:
     try:
-        # Exchange the code for a session
         supabase.auth.exchange_code_for_session(st.query_params)
-        # Clear the URL so it doesn't run again
         st.query_params.clear()
         st.rerun()
     except Exception as e:
@@ -109,6 +110,6 @@ else:
 
     res = supabase.auth.sign_in_with_oauth({
         "provider": "google",
-        "options": {"redirect_to": st.secrets["REDIRECT_URL"]}
+        "options": {"redirect_to": REDIRECT_URL} # Using hardcoded URL now
     })
     st.link_button("Login with Google", res.url, type="primary", use_container_width=True)
