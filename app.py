@@ -1,10 +1,13 @@
 import streamlit as st
-from supabase import create_client, Client
+import requests
 import uuid
+import jwt
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
-# HARDCODE IT HERE - no more secrets line break issues
+# HARDCODED - no secrets line break issues
+SUPABASE_URL = "https://sjmnakvibeplycipgkgj.supabase.co"
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 REDIRECT_URL = "https://veshreels-mayj2zwnuucbmcgarvtbgz.streamlit.app"
 
 st.markdown("""
@@ -18,26 +21,41 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_resource
-def init_supabase() -> Client:
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+# --- SESSION MANAGEMENT ---
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
 
-supabase = init_supabase()
-
-# Handle Google OAuth redirect
-if "code" in st.query_params:
+# --- HANDLE GOOGLE REDIRECT ---
+if "access_token" in st.query_params and not st.session_state.user:
     try:
-        supabase.auth.exchange_code_for_session(st.query_params)
-        st.query_params.clear()
-        st.rerun()
+        access_token = st.query_params["access_token"]
+        # Get user info from token
+        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {access_token}"}
+        user_res = requests.get(f"{SUPABASE_URL}/auth/v1/user", headers=headers)
+        if user_res.status_code == 200:
+            st.session_state.user = user_res.json()
+            st.session_state.access_token = access_token
+            st.query_params.clear()
+            st.rerun()
     except Exception as e:
         st.error(f"Login failed: {e}")
-        st.query_params.clear()
 
-session = supabase.auth.get_session()
+# --- HELPER: Supabase requests with auth ---
+def supa_request(method, path, json_data=None, files=None):
+    url = f"{SUPABASE_URL}{path}"
+    headers = {"apikey": SUPABASE_KEY}
+    if st.session_state.access_token:
+        headers["Authorization"] = f"Bearer {st.session_state.access_token}"
 
-if session:
+    if files:
+        return requests.request(method, url, headers=headers, files=files)
+    return requests.request(method, url, headers=headers, json=json_data)
+
+if st.session_state.user:
     # --- LOGGED IN VIEW ---
+    user = st.session_state.user
     col1, col2, col3 = st.columns([1,3,1])
     with col1:
         st.title("🎬")
@@ -45,10 +63,11 @@ if session:
         st.title("VeshReels")
     with col3:
         if st.button("Logout"):
-            supabase.auth.sign_out()
+            st.session_state.user = None
+            st.session_state.access_token = None
             st.rerun()
 
-    st.caption(f"@{session.user.email.split('@')[0]}")
+    st.caption(f"@{user['email'].split('@')[0]}")
     st.write("---")
 
     # --- UPLOAD SECTION ---
@@ -64,20 +83,22 @@ if session:
             with st.spinner("Posting..."):
                 try:
                     file_ext = uploaded_file.name.split(".")[-1]
-                    file_name = f"{session.user.id}/{uuid.uuid4()}.{file_ext}"
+                    file_name = f"{user['id']}/{uuid.uuid4()}.{file_ext}"
 
-                    supabase.storage.from_("reels").upload(
-                        path=file_name,
-                        file=uploaded_file.getvalue(),
-                        file_options={"content-type": uploaded_file.type}
-                    )
+                    # Upload to storage
+                    files = {'file': (file_name, uploaded_file.getvalue(), uploaded_file.type)}
+                    up_res = supa_request("POST", f"/storage/v1/object/reels/{file_name}", files=files)
+                    up_res.raise_for_status()
 
-                    supabase.table("posts").insert({
-                        "user_id": session.user.id,
-                        "user_email": session.user.email,
+                    # Insert post record
+                    post_data = {
+                        "user_id": user['id'],
+                        "user_email": user['email'],
                         "video_path": file_name,
                         "caption": caption
-                    }).execute()
+                    }
+                    ins_res = supa_request("POST", "/rest/v1/posts", json_data=post_data)
+                    ins_res.raise_for_status()
 
                     st.success("Posted!")
                     st.rerun()
@@ -88,10 +109,11 @@ if session:
     # --- SCROLLING FEED ---
     st.subheader("For You")
     try:
-        posts = supabase.table("posts").select("*").order("created_at", desc=True).execute()
-        if posts.data:
-            for post in posts.data:
-                video_url = supabase.storage.from_("reels").get_public_url(post['video_path'])
+        posts_res = supa_request("GET", "/rest/v1/posts?select=*&order=created_at.desc")
+        posts = posts_res.json()
+        if posts:
+            for post in posts:
+                video_url = f"{SUPABASE_URL}/storage/v1/object/public/reels/{post['video_path']}"
                 with st.container():
                     st.video(video_url)
                     st.markdown(f"**@{post['user_email'].split('@')[0]}**")
@@ -108,8 +130,6 @@ else:
     st.title("🎬 VeshReels")
     st.subheader("Watch and share short videos")
 
-    res = supabase.auth.sign_in_with_oauth({
-        "provider": "google",
-        "options": {"redirect_to": REDIRECT_URL} # Using hardcoded URL now
-    })
-    st.link_button("Login with Google", res.url, type="primary", use_container_width=True)
+    # Build Google OAuth URL manually to use Implicit Flow instead of PKCE
+    google_url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={REDIRECT_URL}"
+    st.link_button("Login with Google", google_url, type="primary", use_container_width=True)
