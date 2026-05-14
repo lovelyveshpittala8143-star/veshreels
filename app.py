@@ -1,13 +1,9 @@
 import streamlit as st
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, AudioFileClip
-from groq import Groq
-import tempfile
-import os
 from supabase import create_client, Client
+from groq import Groq
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
-# --- 1. INIT CONNECTIONS ---
 @st.cache_resource
 def init_connections():
     url = st.secrets["SUPABASE_URL"]
@@ -18,7 +14,7 @@ def init_connections():
 
 supabase, groq = init_connections()
 
-# --- 2. HANDLE GOOGLE OAUTH REDIRECT ---
+# Handle Google OAuth callback
 if "code" in st.query_params:
     try:
         supabase.auth.exchange_code_for_session(st.query_params)
@@ -28,7 +24,7 @@ if "code" in st.query_params:
         st.error("Google login failed. Try again.")
         st.query_params.clear()
 
-# --- 3. CHECK USER SESSION ---
+# Check if user is logged in
 if "user" not in st.session_state:
     try:
         session = supabase.auth.get_session()
@@ -36,12 +32,11 @@ if "user" not in st.session_state:
     except:
         st.session_state.user = None
 
-# --- 4. LOGIN PAGE ---
+# LOGIN PAGE
 if st.session_state.user is None:
     st.title("VeshReels 🎬")
     st.subheader("Create & Share Videos - 100% Free")
 
-    # Google Login Button - This version actually redirects
     if st.button("🔐 Continue with Google", type="primary", use_container_width=True):
         res = supabase.auth.sign_in_with_oauth({
             "provider": "google",
@@ -54,7 +49,6 @@ if st.session_state.user is None:
 
     st.markdown("<center>or</center>", unsafe_allow_html=True)
 
-    # Email Login Form
     with st.form("email_login"):
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
@@ -79,7 +73,7 @@ if st.session_state.user is None:
                 st.error("Signup failed. Email may already exist.")
     st.stop()
 
-# --- 5. USER IS LOGGED IN - MAIN APP ---
+# MAIN APP - USER IS LOGGED IN
 user = st.session_state.user
 st.sidebar.title(f"Hey, {user.email.split('@')[0]} 👋")
 if user.user_metadata.get("avatar_url"):
@@ -92,10 +86,10 @@ if st.sidebar.button("Logout"):
     st.session_state.user = None
     st.rerun()
 
-# --- 6. YOUR APP PAGES ---
 if page == "🏠 Feed":
     st.title("Feed")
     st.info("Video feed coming soon...")
+    st.success(f"Logged in as: {user.email}")
 
 elif page == "🎬 Create Reel":
     st.title("Create New Reel")
