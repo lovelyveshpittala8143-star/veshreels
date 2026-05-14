@@ -46,7 +46,7 @@ if st.session_state.user is None:
         res = supabase.auth.sign_in_with_oauth({
             "provider": "google",
             "options": {
-                "redirect_to": "https://veshreels-oscqcpah5siaby32fsmhqk.streamlit.app/"
+                "redirect_to": "https://veshreels-oscqcpah5siaby32fsmhqk.streamlit.app"
             }
         })
         st.markdown(f'<meta http-equiv="refresh" content="0; url={res.url}">', unsafe_allow_html=True)
