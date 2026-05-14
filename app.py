@@ -14,15 +14,13 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- Handle Google OAuth Callback ---
-# This fixes the "code verifier" error
-query_params = st.experimental_get_query_params()
-if "code" in query_params:
+# --- Handle Google OAuth Callback - FIXED FOR NEW STREAMLIT ---
+if "code" in st.query_params:
     try:
         # Exchange the code for a session
-        supabase.auth.exchange_code_for_session({"auth_code": query_params["code"][0]})
+        supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
         # Clear the URL params so it doesn't run again
-        st.experimental_set_query_params()
+        st.query_params.clear()
         st.rerun()
     except Exception as e:
         st.error(f"Login failed: {e}")
@@ -61,7 +59,6 @@ else:
     st.write("Login to generate AI reel scripts")
 
     if st.button("Login with Google"):
-        # This line sends you to Google. REDIRECT_URL from secrets is critical here.
         supabase.auth.sign_in_with_oauth({
             "provider": "google",
             "options": {"redirect_to": st.secrets.get("REDIRECT_URL", "")}
