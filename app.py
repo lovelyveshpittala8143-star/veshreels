@@ -17,14 +17,21 @@ def init_connections():
 
 supabase, groq = init_connections()
 
-# Handle OAuth redirect
+# Handle OAuth redirect from Google
 if "code" in st.query_params:
-    supabase.auth.exchange_code_for_session(st.query_params)
+    try:
+        supabase.auth.exchange_code_for_session(st.query_params)
+    except:
+        pass
     st.query_params.clear()
 
-# Check user session
+# Check user session safely - THIS IS THE FIX
 if "user" not in st.session_state:
-    st.session_state.user = supabase.auth.get_user().user
+    try:
+        session = supabase.auth.get_session()
+        st.session_state.user = session.user if session else None
+    except:
+        st.session_state.user = None
 
 if st.session_state.user is None:
     st.title("VeshReels 🎬")
@@ -35,7 +42,7 @@ if st.session_state.user is None:
         supabase.auth.sign_in_with_oauth({
             "provider": "google",
             "options": {
-                "redirect_to": st.secrets.get("STREAMLIT_URL", "http://localhost:8501")
+                "redirect_to": st.secrets["STREAMLIT_URL"]
             }
         })
         st.rerun()
@@ -69,7 +76,8 @@ if st.session_state.user is None:
 # --- USER IS LOGGED IN ---
 user = st.session_state.user
 st.sidebar.title(f"Hey, {user.email.split('@')[0]} 👋")
-st.sidebar.image(user.user_metadata.get("avatar_url", ""), width=50) if user.user_metadata.get("avatar_url") else None
+if user.user_metadata.get("avatar_url"):
+    st.sidebar.image(user.user_metadata.get("avatar_url"), width=50)
 
 page = st.sidebar.radio("Menu", ["🏠 Feed", "🎬 Create Reel", "👤 My Reels"])
 if st.sidebar.button("Logout"):
@@ -78,5 +86,4 @@ if st.sidebar.button("Logout"):
     st.rerun()
 
 # PASTE THE REST OF YOUR APP CODE HERE
-# Your video upload, feed, etc code goes below this line
 st.write("You are logged in! Add your reel creation code here 👑")
