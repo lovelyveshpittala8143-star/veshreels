@@ -6,7 +6,7 @@ st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
 st.markdown("""
     <style>
- .block-container {
+.block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;
         padding-left: 1rem;
@@ -21,9 +21,7 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- REMOVED THE MANUAL CODE EXCHANGE ---
-# Supabase handles it automatically now
-
+# Get session - Supabase handles OAuth redirect automatically
 session = supabase.auth.get_session()
 
 if session:
