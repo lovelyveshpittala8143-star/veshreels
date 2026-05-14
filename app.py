@@ -4,10 +4,9 @@ import uuid
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
-# Remove Streamlit's default padding to make videos bigger
 st.markdown("""
     <style>
-  .block-container {
+ .block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;
         padding-left: 1rem;
@@ -22,19 +21,13 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- Handle Google OAuth Callback ---
-if "code" in st.query_params:
-    try:
-        supabase.auth.exchange_code_for_session({"auth_code": st.query_params["code"]})
-        st.query_params.clear()
-        st.rerun()
-    except Exception as e:
-        st.error(f"Login failed: {e}")
+# --- REMOVED THE MANUAL CODE EXCHANGE ---
+# Supabase handles it automatically now
 
 session = supabase.auth.get_session()
 
 if session:
-    # --- HEADER ---
+    # --- LOGGED IN VIEW ---
     col1, col2, col3 = st.columns([1,3,1])
     with col1:
         st.title("🎬")
@@ -63,14 +56,12 @@ if session:
                     file_ext = uploaded_file.name.split(".")[-1]
                     file_name = f"{session.user.id}/{uuid.uuid4()}.{file_ext}"
 
-                    # Upload video - FIXED LINE
                     supabase.storage.from_("reels").upload(
                         path=file_name,
                         file=uploaded_file.getvalue(),
                         file_options={"content-type": uploaded_file.type}
                     )
 
-                    # Save metadata to database table called 'posts'
                     supabase.table("posts").insert({
                         "user_id": session.user.id,
                         "user_email": session.user.email,
@@ -86,33 +77,21 @@ if session:
 
     # --- SCROLLING FEED ---
     st.subheader("For You")
-
     try:
-        # Get all posts, newest first
         posts = supabase.table("posts").select("*").order("created_at", desc=True).execute()
-
         if posts.data:
             for post in posts.data:
-                # Get video URL
                 video_url = supabase.storage.from_("reels").get_public_url(post['video_path'])
-
-                # --- REEL CARD ---
                 with st.container():
-                    # Big vertical video
                     st.video(video_url)
-
-                    # Caption + user
                     st.markdown(f"**@{post['user_email'].split('@')[0]}**")
                     if post['caption']:
                         st.write(post['caption'])
-
-                    st.write("---") # Divider between reels
+                    st.write("---")
         else:
             st.info("No reels yet. Be the first to post!")
-
     except Exception as e:
         st.error("Feed error. Did you create the 'posts' table and 'reels' bucket?")
-        st.code(str(e))
 
 else:
     # --- LOGGED OUT VIEW ---
@@ -121,6 +100,6 @@ else:
 
     res = supabase.auth.sign_in_with_oauth({
         "provider": "google",
-        "options": {"redirect_to": st.secrets.get("REDIRECT_URL", "")}
+        "options": {"redirect_to": st.secrets["REDIRECT_URL"]}
     })
     st.link_button("Login with Google", res.url, type="primary", use_container_width=True)
