@@ -7,6 +7,7 @@ from supabase import create_client, Client
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
+# --- 1. INIT CONNECTIONS ---
 @st.cache_resource
 def init_connections():
     url = st.secrets["SUPABASE_URL"]
@@ -17,15 +18,17 @@ def init_connections():
 
 supabase, groq = init_connections()
 
-# Handle OAuth redirect from Google
+# --- 2. HANDLE GOOGLE OAUTH REDIRECT ---
 if "code" in st.query_params:
     try:
         supabase.auth.exchange_code_for_session(st.query_params)
-    except:
-        pass
-    st.query_params.clear()
+        st.query_params.clear()
+        st.rerun()
+    except Exception as e:
+        st.error("Google login failed. Try again.")
+        st.query_params.clear()
 
-# Check user session safely
+# --- 3. CHECK USER SESSION ---
 if "user" not in st.session_state:
     try:
         session = supabase.auth.get_session()
@@ -33,22 +36,25 @@ if "user" not in st.session_state:
     except:
         st.session_state.user = None
 
+# --- 4. LOGIN PAGE ---
 if st.session_state.user is None:
     st.title("VeshReels 🎬")
     st.subheader("Create & Share Videos - 100% Free")
 
-    # Google Login Button - YOUR URL IS HARDCODED HERE
+    # Google Login Button - This version actually redirects
     if st.button("🔐 Continue with Google", type="primary", use_container_width=True):
-        supabase.auth.sign_in_with_oauth({
+        res = supabase.auth.sign_in_with_oauth({
             "provider": "google",
             "options": {
                 "redirect_to": "https://veshreels-oscqcpah5siaby32fsmhqk.streamlit.app/"
             }
         })
-        st.rerun()
+        st.markdown(f'<meta http-equiv="refresh" content="0; url={res.url}">', unsafe_allow_html=True)
+        st.stop()
 
     st.markdown("<center>or</center>", unsafe_allow_html=True)
 
+    # Email Login Form
     with st.form("email_login"):
         email = st.text_input("Email")
         password = st.text_input("Password", type="password")
@@ -73,17 +79,28 @@ if st.session_state.user is None:
                 st.error("Signup failed. Email may already exist.")
     st.stop()
 
-# --- USER IS LOGGED IN ---
+# --- 5. USER IS LOGGED IN - MAIN APP ---
 user = st.session_state.user
 st.sidebar.title(f"Hey, {user.email.split('@')[0]} 👋")
 if user.user_metadata.get("avatar_url"):
     st.sidebar.image(user.user_metadata.get("avatar_url"), width=50)
 
 page = st.sidebar.radio("Menu", ["🏠 Feed", "🎬 Create Reel", "👤 My Reels"])
+
 if st.sidebar.button("Logout"):
     supabase.auth.sign_out()
     st.session_state.user = None
     st.rerun()
 
-# PASTE THE REST OF YOUR APP CODE HERE
-st.write("You are logged in! Add your reel creation code here 👑")
+# --- 6. YOUR APP PAGES ---
+if page == "🏠 Feed":
+    st.title("Feed")
+    st.info("Video feed coming soon...")
+
+elif page == "🎬 Create Reel":
+    st.title("Create New Reel")
+    st.info("Video editor coming soon...")
+
+elif page == "👤 My Reels":
+    st.title("My Reels")
+    st.info("Your reels will show here...")
