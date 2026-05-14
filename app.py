@@ -1,5 +1,5 @@
 import streamlit as st
-from supabase import create_client
+from supabase import create_client, Client
 import uuid
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
@@ -16,12 +16,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 @st.cache_resource
-def init_supabase():
+def init_supabase() -> Client:
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 supabase = init_supabase()
 
-# Get session - Supabase handles OAuth redirect automatically
+# --- CRITICAL: Handle Google OAuth redirect ---
+if "code" in st.query_params:
+    try:
+        # Exchange the code for a session
+        supabase.auth.exchange_code_for_session(st.query_params)
+        # Clear the URL so it doesn't run again
+        st.query_params.clear()
+        st.rerun()
+    except Exception as e:
+        st.error(f"Login failed: {e}")
+        st.query_params.clear()
+
 session = supabase.auth.get_session()
 
 if session:
