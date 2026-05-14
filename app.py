@@ -35,7 +35,8 @@ if session:
             supabase.auth.sign_out()
             st.rerun()
 
-    st.caption(f"@{user.email.split('@')[0]}")
+    phone = user.phone if user.phone else user.email
+    st.caption(f"@{phone}")
     st.write("---")
 
     # --- UPLOAD SECTION ---
@@ -61,7 +62,7 @@ if session:
 
                     supabase.table("posts").insert({
                         "user_id": user.id,
-                        "user_email": user.email,
+                        "user_email": phone, # Using phone as identifier
                         "video_path": file_name,
                         "caption": caption
                     }).execute()
@@ -81,7 +82,7 @@ if session:
                 video_url = supabase.storage.from_("reels").get_public_url(post['video_path'])
                 with st.container():
                     st.video(video_url)
-                    st.markdown(f"**@{post['user_email'].split('@')[0]}**")
+                    st.markdown(f"**@{post['user_email']}**")
                     if post['caption']:
                         st.write(post['caption'])
                     st.write("---")
@@ -91,25 +92,46 @@ if session:
         st.error("Feed error. Did you create the 'posts' table and 'reels' bucket?")
 
 else:
-    # --- LOGGED OUT VIEW - MAGIC LINK ---
+    # --- LOGGED OUT VIEW - PHONE OTP ---
     st.title("🎬 VeshReels")
     st.subheader("Watch and share short videos")
-    st.write("Login with your email - no password needed")
+    
+    if 'otp_sent' not in st.session_state:
+        st.session_state.otp_sent = False
 
-    email = st.text_input("Email address", placeholder="you@gmail.com")
-
-    if st.button("Send Magic Link", type="primary", use_container_width=True):
-        if email:
-            try:
-                supabase.auth.sign_in_with_otp({
-                    "email": email,
-                    "options": {
-                        "email_redirect_to": "https://veshreels-mayj2zwnuucbmcgarvtbgz.streamlit.app"
-                    }
-                })
-                st.success("✅ Magic link sent! Check your email and click the link to login.")
-                st.info("The link expires in 1 hour. Check spam if you don't see it.")
-            except Exception as e:
-                st.error(f"Error sending link: {e}")
-        else:
-            st.warning("Please enter your email")
+    if not st.session_state.otp_sent:
+        st.write("Login with your phone number")
+        phone = st.text_input("Phone number", placeholder="+919876543210", help="Include country code, e.g. +91")
+        
+        if st.button("Send OTP", type="primary", use_container_width=True):
+            if phone:
+                try:
+                    supabase.auth.sign_in_with_otp({"phone": phone})
+                    st.session_state.otp_sent = True
+                    st.session_state.phone = phone
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+            else:
+                st.warning("Please enter your phone number")
+    else:
+        st.success(f"OTP sent to {st.session_state.phone}")
+        otp = st.text_input("Enter 6-digit OTP", max_chars=6)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Verify OTP", type="primary", use_container_width=True):
+                try:
+                    supabase.auth.verify_otp({
+                        "phone": st.session_state.phone,
+                        "token": otp,
+                        "type": "sms"
+                    })
+                    st.session_state.otp_sent = False
+                    st.rerun()
+                except Exception as e:
+                    st.error("Invalid OTP. Try again.")
+        with col2:
+            if st.button("Change Number", use_container_width=True):
+                st.session_state.otp_sent = False
+                st.rerun()
