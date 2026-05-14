@@ -1,9 +1,20 @@
 import streamlit as st
 from supabase import create_client
-from datetime import datetime
 import uuid
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
+
+# Remove Streamlit's default padding to make videos bigger
+st.markdown("""
+    <style>
+  .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 @st.cache_resource
 def init_supabase():
@@ -23,83 +34,90 @@ if "code" in st.query_params:
 session = supabase.auth.get_session()
 
 if session:
-    # --- LOGGED IN VIEW ---
-    st.title("🎬 VeshReels")
-    st.success(f"Logged in as: {session.user.email}")
-    
-    col1, col2 = st.columns([6,1])
+    # --- HEADER ---
+    col1, col2, col3 = st.columns([1,3,1])
+    with col1:
+        st.title("🎬")
     with col2:
+        st.title("VeshReels")
+    with col3:
         if st.button("Logout"):
             supabase.auth.sign_out()
             st.rerun()
 
+    st.caption(f"@{session.user.email.split('@')[0]}")
     st.write("---")
-    
-    # --- VIDEO UPLOAD ---
-    st.subheader("Upload Your Reel")
-    st.caption("Record your reel on your phone first, then upload it here")
-    
-    uploaded_file = st.file_uploader(
-        "Choose a video file", 
-        type=["mp4", "mov", "avi", "mkv"],
-        help="Upload the reel you recorded on Instagram/TikTok"
-    )
 
-    if uploaded_file is not None:
-        # Show the video
-        st.video(uploaded_file)
-        
-        st.write("**Video details:**")
-        st.write(f"Filename: {uploaded_file.name}")
-        st.write(f"Size: {round(uploaded_file.size / 1024, 2)} MB")
-        
-        # Save to Supabase Storage
-        if st.button("Save Reel to Cloud", type="primary"):
-            with st.spinner("Uploading to Supabase..."):
+    # --- UPLOAD SECTION ---
+    with st.expander("⬆️ Upload New Reel", expanded=False):
+        uploaded_file = st.file_uploader(
+            "Upload MP4/MOV",
+            type=["mp4", "mov", "avi"],
+            label_visibility="collapsed"
+        )
+        caption = st.text_input("Add a caption", placeholder="Describe your reel...")
+
+        if uploaded_file and st.button("Post Reel", type="primary", use_container_width=True):
+            with st.spinner("Posting..."):
                 try:
-                    # Create unique filename
                     file_ext = uploaded_file.name.split(".")[-1]
                     file_name = f"{session.user.id}/{uuid.uuid4()}.{file_ext}"
-                    
-                    # Upload to Supabase Storage bucket called 'reels'
-                    res = supabase.storage.from_("reels").upload(
-                        file=file_name,
-                        file_options={"content-type": uploaded_file.type},
+
+                    # Upload video - FIXED LINE
+                    supabase.storage.from_("reels").upload(
                         path=file_name,
-                        file=uploaded_file.getvalue()
+                        file=uploaded_file.getvalue(),
+                        file_options={"content-type": uploaded_file.type}
                     )
-                    
-                    st.success("Reel uploaded successfully!")
-                    st.balloons()
-                    
-                    # Get public URL
-                    url = supabase.storage.from_("reels").get_public_url(file_name)
-                    st.write("**Share link:**")
-                    st.code(url)
-                    
+
+                    # Save metadata to database table called 'posts'
+                    supabase.table("posts").insert({
+                        "user_id": session.user.id,
+                        "user_email": session.user.email,
+                        "video_path": file_name,
+                        "caption": caption
+                    }).execute()
+
+                    st.success("Posted!")
+                    st.rerun()
+
                 except Exception as e:
                     st.error(f"Upload failed: {e}")
-                    st.caption("Make sure you created a 'reels' bucket in Supabase Storage and set it to public")
 
-    # Show user's uploaded reels
-    st.write("---")
-    st.subheader("Your Uploaded Reels")
+    # --- SCROLLING FEED ---
+    st.subheader("For You")
+
     try:
-        files = supabase.storage.from_("reels").list(session.user.id)
-        if files:
-            for file in files:
-                url = supabase.storage.from_("reels").get_public_url(f"{session.user.id}/{file['name']}")
-                st.video(url)
-                st.caption(file['name'])
+        # Get all posts, newest first
+        posts = supabase.table("posts").select("*").order("created_at", desc=True).execute()
+
+        if posts.data:
+            for post in posts.data:
+                # Get video URL
+                video_url = supabase.storage.from_("reels").get_public_url(post['video_path'])
+
+                # --- REEL CARD ---
+                with st.container():
+                    # Big vertical video
+                    st.video(video_url)
+
+                    # Caption + user
+                    st.markdown(f"**@{post['user_email'].split('@')[0]}**")
+                    if post['caption']:
+                        st.write(post['caption'])
+
+                    st.write("---") # Divider between reels
         else:
-            st.info("No reels uploaded yet. Upload your first one above!")
-    except:
-        st.caption("Create a 'reels' bucket in Supabase Storage to save videos")
+            st.info("No reels yet. Be the first to post!")
+
+    except Exception as e:
+        st.error("Feed error. Did you create the 'posts' table and 'reels' bucket?")
+        st.code(str(e))
 
 else:
     # --- LOGGED OUT VIEW ---
     st.title("🎬 VeshReels")
-    st.write("Login to upload and save your reels")
+    st.subheader("Watch and share short videos")
 
     res = supabase.auth.sign_in_with_oauth({
         "provider": "google",
