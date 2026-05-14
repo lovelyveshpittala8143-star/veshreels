@@ -1,18 +1,12 @@
 import streamlit as st
-import requests
+from supabase import create_client, Client
 import uuid
-import jwt
 
 st.set_page_config(page_title="VeshReels", page_icon="🎬", layout="wide")
 
-# HARDCODED - no secrets line break issues
-SUPABASE_URL = "https://sjmnakvibeplycipgkgj.supabase.co"
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
-REDIRECT_URL = "https://veshreels-mayj2zwnuucbmcgarvtbgz.streamlit.app"
-
 st.markdown("""
     <style>
-.block-container {
+   .block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;
         padding-left: 1rem;
@@ -21,41 +15,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION MANAGEMENT ---
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "access_token" not in st.session_state:
-    st.session_state.access_token = None
+@st.cache_resource
+def init_supabase() -> Client:
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
-# --- HANDLE GOOGLE REDIRECT ---
-if "access_token" in st.query_params and not st.session_state.user:
-    try:
-        access_token = st.query_params["access_token"]
-        # Get user info from token
-        headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {access_token}"}
-        user_res = requests.get(f"{SUPABASE_URL}/auth/v1/user", headers=headers)
-        if user_res.status_code == 200:
-            st.session_state.user = user_res.json()
-            st.session_state.access_token = access_token
-            st.query_params.clear()
-            st.rerun()
-    except Exception as e:
-        st.error(f"Login failed: {e}")
+supabase = init_supabase()
+session = supabase.auth.get_session()
 
-# --- HELPER: Supabase requests with auth ---
-def supa_request(method, path, json_data=None, files=None):
-    url = f"{SUPABASE_URL}{path}"
-    headers = {"apikey": SUPABASE_KEY}
-    if st.session_state.access_token:
-        headers["Authorization"] = f"Bearer {st.session_state.access_token}"
-
-    if files:
-        return requests.request(method, url, headers=headers, files=files)
-    return requests.request(method, url, headers=headers, json=json_data)
-
-if st.session_state.user:
+if session:
     # --- LOGGED IN VIEW ---
-    user = st.session_state.user
+    user = session.user
     col1, col2, col3 = st.columns([1,3,1])
     with col1:
         st.title("🎬")
@@ -63,11 +32,10 @@ if st.session_state.user:
         st.title("VeshReels")
     with col3:
         if st.button("Logout"):
-            st.session_state.user = None
-            st.session_state.access_token = None
+            supabase.auth.sign_out()
             st.rerun()
 
-    st.caption(f"@{user['email'].split('@')[0]}")
+    st.caption(f"@{user.email.split('@')[0]}")
     st.write("---")
 
     # --- UPLOAD SECTION ---
@@ -83,22 +51,20 @@ if st.session_state.user:
             with st.spinner("Posting..."):
                 try:
                     file_ext = uploaded_file.name.split(".")[-1]
-                    file_name = f"{user['id']}/{uuid.uuid4()}.{file_ext}"
+                    file_name = f"{user.id}/{uuid.uuid4()}.{file_ext}"
 
-                    # Upload to storage
-                    files = {'file': (file_name, uploaded_file.getvalue(), uploaded_file.type)}
-                    up_res = supa_request("POST", f"/storage/v1/object/reels/{file_name}", files=files)
-                    up_res.raise_for_status()
+                    supabase.storage.from_("reels").upload(
+                        path=file_name,
+                        file=uploaded_file.getvalue(),
+                        file_options={"content-type": uploaded_file.type}
+                    )
 
-                    # Insert post record
-                    post_data = {
-                        "user_id": user['id'],
-                        "user_email": user['email'],
+                    supabase.table("posts").insert({
+                        "user_id": user.id,
+                        "user_email": user.email,
                         "video_path": file_name,
                         "caption": caption
-                    }
-                    ins_res = supa_request("POST", "/rest/v1/posts", json_data=post_data)
-                    ins_res.raise_for_status()
+                    }).execute()
 
                     st.success("Posted!")
                     st.rerun()
@@ -109,11 +75,10 @@ if st.session_state.user:
     # --- SCROLLING FEED ---
     st.subheader("For You")
     try:
-        posts_res = supa_request("GET", "/rest/v1/posts?select=*&order=created_at.desc")
-        posts = posts_res.json()
-        if posts:
-            for post in posts:
-                video_url = f"{SUPABASE_URL}/storage/v1/object/public/reels/{post['video_path']}"
+        posts = supabase.table("posts").select("*").order("created_at", desc=True).execute()
+        if posts.data:
+            for post in posts.data:
+                video_url = supabase.storage.from_("reels").get_public_url(post['video_path'])
                 with st.container():
                     st.video(video_url)
                     st.markdown(f"**@{post['user_email'].split('@')[0]}**")
@@ -126,10 +91,25 @@ if st.session_state.user:
         st.error("Feed error. Did you create the 'posts' table and 'reels' bucket?")
 
 else:
-    # --- LOGGED OUT VIEW ---
+    # --- LOGGED OUT VIEW - MAGIC LINK ---
     st.title("🎬 VeshReels")
     st.subheader("Watch and share short videos")
+    st.write("Login with your email - no password needed")
 
-    # Build Google OAuth URL manually to use Implicit Flow instead of PKCE
-    google_url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={REDIRECT_URL}"
-    st.link_button("Login with Google", google_url, type="primary", use_container_width=True)
+    email = st.text_input("Email address", placeholder="you@gmail.com")
+
+    if st.button("Send Magic Link", type="primary", use_container_width=True):
+        if email:
+            try:
+                supabase.auth.sign_in_with_otp({
+                    "email": email,
+                    "options": {
+                        "email_redirect_to": "https://veshreels-mayj2zwnuucbmcgarvtbgz.streamlit.app"
+                    }
+                })
+                st.success("✅ Magic link sent! Check your email and click the link to login.")
+                st.info("The link expires in 1 hour. Check spam if you don't see it.")
+            except Exception as e:
+                st.error(f"Error sending link: {e}")
+        else:
+            st.warning("Please enter your email")
